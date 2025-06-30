@@ -1,0 +1,7 @@
+services:
+  chroma:
+    image: chromadb/chroma:latest
+    volumes:
+      - ./chroma_db:/data
+    ports:
+      - "8765:8000"
