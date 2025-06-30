@@ -1,25 +1,35 @@
 import streamlit as st
-from dotenv import dotenv_values
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.documents import Document
 from datetime import datetime
 import chromadb
 from langchain_openai import AzureOpenAIEmbeddings
+import os
 
-config = dotenv_values(".env")
+chroma_host = "chroma"
+chroma_port = 8000
+
+if not os.getenv("AZURE_EMBEDDING_ENDPOINT"):
+    from dotenv import load_dotenv
+
+    # Env is not loaded yet
+    load_dotenv()
+chroma_host = "localhost"
+chroma_port = 8765
+
 embeddings = AzureOpenAIEmbeddings(
     model="text-embedding-3-small",
-    azure_endpoint=config["AZURE_EMBEDDING_ENDPOINT"],
-    api_key=config["AZURE_EMBEDDING_API_KEY"],
+    azure_endpoint=os.getenv("AZURE_EMBEDDING_ENDPOINT"),
+    api_key=os.getenv("AZURE_EMBEDDING_API_KEY"),
 )
 
 ef = embeddings.embed_documents
 st.title("LangChain practical example")
 
-groq_api_key = config["GROQ_API_KEY"]
+groq_api_key = os.getenv("GROQ_API_KEY")
 
-client = chromadb.HttpClient(host="localhost", port=8765)
+client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
 # client = chromadb.PersistentClient(path="chroma_db")
 if not (ret := client.heartbeat()):
     st.error("Chroma server is not running")
@@ -27,6 +37,16 @@ if not (ret := client.heartbeat()):
 else:
     st.write(f"Chroma time: {datetime.fromtimestamp(int(ret / 1e9))}")
 
+if "relevant_docs" not in st.session_state:
+    st.session_state.relevant_docs = []
+
+if st.session_state.relevant_docs:
+    with st.sidebar:
+        st.write("Relevant documents:")
+        for doc in st.session_state.relevant_docs:
+            st.divider()
+            st.write(doc)
+        st.divider()
 
 collection = client.get_or_create_collection("war_and_peace_local")
 
@@ -42,7 +62,7 @@ if "file_path" not in st.session_state:
 
 if "llm" not in st.session_state:
     llm = ChatGroq(
-        model=config["GROQ_MODEL"],
+        model=os.getenv("GROQ_MODEL"),
         api_key=groq_api_key,
         temperature=0.7,
         # max_tokens=40,
@@ -64,8 +84,9 @@ def get_relevant_docs(message: HumanMessage) -> list[str]:
 
 
 def generate_response(msg: str):
-    res = collection.query(query_texts=[msg], n_results=5)
-    docs = [i[0] for i in res["documents"]]
+    res = collection.query(query_texts=[msg], n_results=10)
+    docs = res["documents"][0]
+    st.session_state.relevant_docs = docs
     start_time = datetime.now()
     # relevant_docs = get_relevant_docs(st.session_state.messages[-1])
     combined_sys_message = f"""{system_message}
@@ -91,7 +112,3 @@ if msg := st.chat_input("Enter a message"):
     st.session_state.messages.append(HumanMessage(content=msg))
     response = generate_response(msg)
     st.rerun()
-
-# st.divider()
-# st.write(st.session_state.file_path)
-# st.write(st.session_state.latest_msgs_sent)
